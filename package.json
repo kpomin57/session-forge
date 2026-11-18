@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node session-forge-server/server.js"
   },
   "dependencies": {
     "react": "^19.2.6",
@@ -23,5 +24,8 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
     "vite": "^8.0.12"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

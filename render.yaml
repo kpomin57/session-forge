@@ -1,0 +1,19 @@
+# Render Blueprint: one Node web service that serves the built frontend and the /api backend.
+# In Render: New → Blueprint → pick this repo. You'll be prompted for ANTHROPIC_API_KEY.
+services:
+  - type: web
+    name: session-forge
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build && npm ci --prefix session-forge-server --omit=dev
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RATE_LIMIT_PER_HOUR
+        value: "10"
+      - key: DAILY_GENERATION_CAP
+        value: "200"

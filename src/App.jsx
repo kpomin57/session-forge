@@ -1,29 +1,10 @@
 ﻿import { useState } from "react";
+import {
+    CLASSES, ENVIRONMENTS, THEMES, TONES, VILLAIN_TYPES,
+    MAX_PLAYERS, MAX_TEXT_LENGTH, computeXpBudget,
+} from "../shared/dnd.js";
 
 // ─── Data Tables ──────────────────────────────────────────────────────────────
-const XP_THRESHOLDS = {
-    1: { easy: 25, medium: 50, hard: 75, deadly: 100 },
-    2: { easy: 50, medium: 100, hard: 150, deadly: 200 },
-    3: { easy: 75, medium: 150, hard: 225, deadly: 400 },
-    4: { easy: 125, medium: 250, hard: 375, deadly: 500 },
-    5: { easy: 250, medium: 500, hard: 750, deadly: 1100 },
-    6: { easy: 300, medium: 600, hard: 900, deadly: 1400 },
-    7: { easy: 350, medium: 750, hard: 1100, deadly: 1700 },
-    8: { easy: 450, medium: 900, hard: 1400, deadly: 2100 },
-    9: { easy: 550, medium: 1100, hard: 1600, deadly: 2400 },
-    10: { easy: 600, medium: 1200, hard: 1900, deadly: 2800 },
-    11: { easy: 800, medium: 1600, hard: 2400, deadly: 3600 },
-    12: { easy: 1000, medium: 2000, hard: 3000, deadly: 4500 },
-    13: { easy: 1100, medium: 2200, hard: 3400, deadly: 5100 },
-    14: { easy: 1250, medium: 2500, hard: 3800, deadly: 5700 },
-    15: { easy: 1400, medium: 2800, hard: 4300, deadly: 6400 },
-    16: { easy: 1600, medium: 3200, hard: 4800, deadly: 7200 },
-    17: { easy: 2000, medium: 3900, hard: 5900, deadly: 8800 },
-    18: { easy: 2100, medium: 4200, hard: 6300, deadly: 9500 },
-    19: { easy: 2400, medium: 4900, hard: 7300, deadly: 10900 },
-    20: { easy: 2800, medium: 5700, hard: 8500, deadly: 12700 },
-};
-
 const CR_XP_MAP = [
     { cr: "0", n: 0, xp: 10 }, { cr: "1/8", n: 0.125, xp: 25 }, { cr: "1/4", n: 0.25, xp: 50 },
     { cr: "1/2", n: 0.5, xp: 100 }, { cr: "1", n: 1, xp: 200 }, { cr: "2", n: 2, xp: 450 },
@@ -37,12 +18,6 @@ const CR_XP_MAP = [
 
 const DIFF_COLORS = { Easy: "#16a34a", Medium: "#2563eb", Hard: "#d97706", Deadly: "#dc2626" };
 const TIER_LABELS = { 1: "Tier 1 — Local Heroes", 5: "Tier 2 — Heroes of the Realm", 11: "Tier 3 — Masters", 17: "Tier 4 — World Shapers" };
-
-const CLASSES = ["Barbarian", "Bard", "Cleric", "Druid", "Fighter", "Monk", "Paladin", "Ranger", "Rogue", "Sorcerer", "Warlock", "Wizard", "Artificer"];
-const ENVIRONMENTS = ["Dungeon", "Forest", "City", "Mountains", "Underdark", "Coastal", "Plains", "Desert", "Arctic", "Feywild", "Shadowfell", "Astral Plane"];
-const THEMES = ["Mixed", "Combat Heavy", "Exploration", "Social Intrigue", "Puzzle / Mystery", "Horror", "Heist", "Rescue Mission"];
-const TONES = ["Heroic & Epic", "Dark & Gritty", "Mysterious", "Lighthearted", "Tense & Suspenseful"];
-const VILLAIN_TYPES = ["None", "Dragon", "Undead Lord", "Cult Leader", "Crime Boss", "Corrupt Noble", "Demon/Devil", "Ancient Evil", "Rival Adventurer", "Fey Trickster"];
 
 const D5E = "https://www.dnd5eapi.co/api";
 
@@ -181,8 +156,120 @@ function SessionTab({ data, form }) {
     );
 }
 
+// ─── Stat Block ───────────────────────────────────────────────────────────────
+function findMonsterDetails(monsterDetails, name) {
+    if (!monsterDetails?.length || !name) return null;
+    const n = name.toLowerCase().replace(/s\b/, "").trim();
+    return monsterDetails.find(m => m.name.toLowerCase() === n)
+        || monsterDetails.find(m => {
+            const mn = m.name.toLowerCase();
+            return n.includes(mn) || mn.includes(n);
+        });
+}
+
+const abilityMod = score => Math.floor((score - 10) / 2);
+const fmtMod = m => (m >= 0 ? `+${m}` : `${m}`);
+
+function SBDivider() {
+    return <div style={{ height: 1, background: "#7c2d12", margin: "10px 0", opacity: 0.4 }} />;
+}
+
+function StatBlock({ monster }) {
+    if (!monster) return null;
+    const ac = Array.isArray(monster.armor_class)
+        ? monster.armor_class.map(a => `${a.value}${a.type ? ` (${a.type})` : ""}`).join(", ")
+        : monster.armor_class;
+    const speed = Object.entries(monster.speed || {})
+        .map(([k, v]) => `${k} ${v}`).join(", ");
+    const abilities = [
+        ["STR", monster.strength], ["DEX", monster.dexterity], ["CON", monster.constitution],
+        ["INT", monster.intelligence], ["WIS", monster.wisdom], ["CHA", monster.charisma],
+    ];
+    const saves = monster.proficiencies?.filter(p => p.proficiency.name.startsWith("Saving Throw:")) || [];
+    const skills = monster.proficiencies?.filter(p => p.proficiency.name.startsWith("Skill:")) || [];
+    const senses = monster.senses
+        ? Object.entries(monster.senses).map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`).join(", ")
+        : "";
+
+    return (
+        <div className="sf-statblock" style={{ background: "#fff", border: "1px solid #d4c5a0", borderRadius: 10, padding: "16px 18px", marginTop: 12 }}>
+            <div style={{ fontFamily: "'Cinzel',serif", fontSize: 15, fontWeight: 700, color: "#7c2d12" }}>{monster.name}</div>
+            <div style={{ fontSize: 11, fontStyle: "italic", color: "#6b7280", marginTop: 2 }}>
+                {monster.size} {monster.type}{monster.subtype ? ` (${monster.subtype})` : ""}, {monster.alignment}
+            </div>
+            <SBDivider />
+            <div style={{ fontSize: 12, lineHeight: 1.7, color: "#1a1d29" }}>
+                <div><strong style={{ color: "#7c2d12" }}>Armor Class</strong> {ac}</div>
+                <div><strong style={{ color: "#7c2d12" }}>Hit Points</strong> {monster.hit_points}{monster.hit_dice ? ` (${monster.hit_dice})` : ""}</div>
+                <div><strong style={{ color: "#7c2d12" }}>Speed</strong> {speed}</div>
+            </div>
+            <SBDivider />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6, textAlign: "center" }}>
+                {abilities.map(([k, v]) => (
+                    <div key={k}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#7c2d12" }}>{k}</div>
+                        <div style={{ fontSize: 12 }}>{v} ({fmtMod(abilityMod(v))})</div>
+                    </div>
+                ))}
+            </div>
+            <SBDivider />
+            <div style={{ fontSize: 12, lineHeight: 1.65 }}>
+                {saves.length > 0 && (
+                    <div><strong style={{ color: "#7c2d12" }}>Saving Throws</strong>{" "}
+                        {saves.map(p => `${p.proficiency.name.replace("Saving Throw: ", "")} ${fmtMod(p.value)}`).join(", ")}
+                    </div>
+                )}
+                {skills.length > 0 && (
+                    <div><strong style={{ color: "#7c2d12" }}>Skills</strong>{" "}
+                        {skills.map(p => `${p.proficiency.name.replace("Skill: ", "")} ${fmtMod(p.value)}`).join(", ")}
+                    </div>
+                )}
+                {monster.damage_vulnerabilities?.length > 0 && <div><strong style={{ color: "#7c2d12" }}>Damage Vulnerabilities</strong> {monster.damage_vulnerabilities.join(", ")}</div>}
+                {monster.damage_resistances?.length > 0 && <div><strong style={{ color: "#7c2d12" }}>Damage Resistances</strong> {monster.damage_resistances.join(", ")}</div>}
+                {monster.damage_immunities?.length > 0 && <div><strong style={{ color: "#7c2d12" }}>Damage Immunities</strong> {monster.damage_immunities.join(", ")}</div>}
+                {monster.condition_immunities?.length > 0 && <div><strong style={{ color: "#7c2d12" }}>Condition Immunities</strong> {monster.condition_immunities.map(c => c.name).join(", ")}</div>}
+                {senses && <div><strong style={{ color: "#7c2d12" }}>Senses</strong> {senses}</div>}
+                {monster.languages && <div><strong style={{ color: "#7c2d12" }}>Languages</strong> {monster.languages}</div>}
+                <div><strong style={{ color: "#7c2d12" }}>Challenge</strong> {monster.challenge_rating} ({monster.xp?.toLocaleString()} XP)</div>
+            </div>
+            {monster.special_abilities?.length > 0 && (
+                <>
+                    <SBDivider />
+                    {monster.special_abilities.map((a, i) => (
+                        <div key={i} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 6 }}>
+                            <strong><em>{a.name}.</em></strong> {a.desc}
+                        </div>
+                    ))}
+                </>
+            )}
+            {monster.actions?.length > 0 && (
+                <>
+                    <SBDivider />
+                    <div style={{ fontFamily: "'Cinzel',serif", fontSize: 13, fontWeight: 700, color: "#7c2d12", marginBottom: 6 }}>Actions</div>
+                    {monster.actions.map((a, i) => (
+                        <div key={i} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 6 }}>
+                            <strong><em>{a.name}.</em></strong> {a.desc}
+                        </div>
+                    ))}
+                </>
+            )}
+            {monster.legendary_actions?.length > 0 && (
+                <>
+                    <SBDivider />
+                    <div style={{ fontFamily: "'Cinzel',serif", fontSize: 13, fontWeight: 700, color: "#7c2d12", marginBottom: 6 }}>Legendary Actions</div>
+                    {monster.legendary_actions.map((a, i) => (
+                        <div key={i} style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 6 }}>
+                            <strong><em>{a.name}.</em></strong> {a.desc}
+                        </div>
+                    ))}
+                </>
+            )}
+        </div>
+    );
+}
+
 // ─── Output: Encounter Builder ────────────────────────────────────────────────
-function EncounterTab({ data, form }) {
+function EncounterTab({ data, form, monsterDetails }) {
     const eb = data.encounterBuilder;
     if (!eb) return null;
     const diffColor = DIFF_COLORS[form.difficulty];
@@ -212,27 +299,31 @@ function EncounterTab({ data, form }) {
             {/* Monsters */}
             <SectionLabel>Combat Roster</SectionLabel>
             <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
-                {eb.monsters?.map((m, i) => (
-                    <div key={i} style={{ border: "1px solid #e5dfd3", borderRadius: 14, padding: 20, background: "#faf8f5" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                            <div>
-                                <span style={{ fontFamily: "'Cinzel',serif", fontWeight: 700, fontSize: 16 }}>
-                                    {m.quantity > 1 ? `${m.quantity}× ` : ""}{m.name}
-                                </span>
-                                <span style={{ marginLeft: 10, fontSize: 12, color: "#9ca3af" }}>CR {m.cr}</span>
+                {eb.monsters?.map((m, i) => {
+                    const details = findMonsterDetails(monsterDetails, m.name);
+                    return (
+                        <div key={i} className="sf-monster-card" style={{ border: "1px solid #e5dfd3", borderRadius: 14, padding: 20, background: "#faf8f5" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                                <div>
+                                    <span style={{ fontFamily: "'Cinzel',serif", fontWeight: 700, fontSize: 16 }}>
+                                        {m.quantity > 1 ? `${m.quantity}× ` : ""}{m.name}
+                                    </span>
+                                    <span style={{ marginLeft: 10, fontSize: 12, color: "#9ca3af" }}>CR {m.cr}</span>
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                    <Badge bg="#fee2e2" color="#991b1b">{m.role}</Badge>
+                                    <Badge bg="#f3f4f6" color="#374151">{((m.xpEach || 0) * (m.quantity || 1)).toLocaleString()} XP</Badge>
+                                </div>
                             </div>
-                            <div style={{ display: "flex", gap: 8 }}>
-                                <Badge bg="#fee2e2" color="#991b1b">{m.role}</Badge>
-                                <Badge bg="#f3f4f6" color="#374151">{((m.xpEach || 0) * (m.quantity || 1)).toLocaleString()} XP</Badge>
+                            <p style={{ fontSize: 13, fontStyle: "italic", color: "#6b7280", margin: "0 0 12px", lineHeight: 1.55 }}>{m.flavor}</p>
+                            <div style={{ background: "#fff", borderRadius: 8, padding: "10px 14px", border: "1px solid #e5dfd3" }}>
+                                <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#c53131" }}>Tactics: </span>
+                                <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{m.tactics}</span>
                             </div>
+                            <StatBlock monster={details} />
                         </div>
-                        <p style={{ fontSize: 13, fontStyle: "italic", color: "#6b7280", margin: "0 0 12px", lineHeight: 1.55 }}>{m.flavor}</p>
-                        <div style={{ background: "#fff", borderRadius: 8, padding: "10px 14px", border: "1px solid #e5dfd3" }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "#c53131" }}>Tactics: </span>
-                            <span style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{m.tactics}</span>
-                        </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             {/* Terrain */}
@@ -282,6 +373,7 @@ export default function SessionForge() {
     const [tab, setTab] = useState("session");
     const [loading, setLoading] = useState(false);
     const [output, setOutput] = useState(null);
+    const [monsterDetails, setMonsterDetails] = useState([]);
     const [error, setError] = useState(null);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -290,109 +382,31 @@ export default function SessionForge() {
         classes: f.classes.includes(cls) ? f.classes.filter(c => c !== cls) : [...f.classes, cls]
     }));
 
-    const xpBudget = (() => {
-        const lvl = Math.min(20, Math.max(1, form.partyLevel));
-        return XP_THRESHOLDS[lvl][form.difficulty.toLowerCase()] * form.playerCount;
-    })();
+    const xpBudget = computeXpBudget(form.partyLevel, form.difficulty, form.playerCount);
 
     const generate = async () => {
         setLoading(true); setError(null); setOutput(null);
         try {
             const monsters = await fetchMonsters(xpBudget);
-            const monsterList = monsters.length
-                ? "- " + monsters.map(m =>
-                    `${m.name} (CR ${m.challenge_rating}, HP ${m.hit_points}, AC ${Array.isArray(m.armor_class) ? m.armor_class[0]?.value : m.armor_class})`
-                ).join("\n- ")
-                : "No monsters available from API — create appropriate ones";
-
-            const prompt = `You are an expert Dungeon Master and adventure designer preparing a D&D 5e (2024 rules compatible) session.
-
-PARTY: ${form.playerCount} players at level ${form.partyLevel}
-Classes: ${form.classes.length ? form.classes.join(", ") : "Not specified"}
-Special abilities/context: ${form.specialAbilities || "None"}
-
-SESSION CONFIG:
-- XP Budget: ${xpBudget.toLocaleString()} XP (${form.difficulty} difficulty)
-- Environment: ${form.environment}
-- Theme: ${form.theme}
-- Tone: ${form.tone}
-- Antagonist type: ${form.villainType}
-- DM Notes: ${form.notes || "None"}
-
-MONSTERS RETRIEVED FROM 5E API (use or adapt these):
-${monsterList}
-
-Respond ONLY with a valid JSON object — no markdown, no commentary, no code fences:
-{
-  "sessionOutline": {
-    "title": "Evocative session title",
-    "hook": "2-3 sentence compelling hook that immediately draws players in",
-    "acts": [
-      {
-        "act": "Act 1 — The Setup",
-        "summary": "What happens in this act and why it matters narratively",
-        "keyMoment": "The pivotal scene or decision point of this act",
-        "readAloud": "2-3 sentence evocative boxed text for the DM to read aloud"
-      },
-      {
-        "act": "Act 2 — The Confrontation",
-        "summary": "...", "keyMoment": "...", "readAloud": "..."
-      },
-      {
-        "act": "Act 3 — The Resolution",
-        "summary": "...", "keyMoment": "...", "readAloud": "..."
-      }
-    ],
-    "npcs": [
-      {
-        "name": "NPC Name",
-        "role": "Narrative role (Ally / Villain / Wild Card / Questgiver)",
-        "personality": "2-3 traits plus one memorable quirk",
-        "secret": "What they're hiding or what players could discover"
-      }
-    ],
-    "plotTwist": "A dramatic optional twist the DM can deploy",
-    "reward": "Suggested reward — XP notes, treasure, or story payoff"
-  },
-  "encounterBuilder": {
-    "title": "Encounter name",
-    "setup": "Tactical positioning — where enemies start, lighting, terrain",
-    "readAloud": "4-5 sentence vivid scene-setting for when players arrive",
-    "monsters": [
-      {
-        "name": "Monster name (use from API list if possible)",
-        "quantity": 2,
-        "cr": "CR value as string",
-        "xpEach": 450,
-        "role": "Tactical role: Skirmisher | Brute | Controller | Support | Boss",
-        "tactics": "Specific tactical behavior — opening move, ability highlight, focus target logic",
-        "flavor": "One vivid narrative sentence placing this creature in the scene"
-      }
-    ],
-    "totalXp": ${xpBudget},
-    "terrainFeatures": [
-      "Tactically useful feature",
-      "Environmental hazard or obstacle",
-      "Atmospheric element"
-    ],
-    "dmTips": [
-      "How to run this encounter at its best",
-      "Pacing or spotlight tip",
-      "How to reward clever thinking"
-    ],
-    "morale": "Conditions for enemies to flee, surrender, or fight to the death",
-    "aftermath": "Narrative consequence — win or lose, what changes in the world?"
-  }
-}`;
+            setMonsterDetails(monsters);
+            // The server builds the prompt from these fields; only short monster summaries are sent.
+            const monsterSummaries = monsters.map(m => ({
+                name: m.name,
+                cr: m.challenge_rating,
+                hp: m.hit_points,
+                ac: Array.isArray(m.armor_class) ? m.armor_class[0]?.value : m.armor_class,
+            }));
 
             const resp = await fetch("/api/generate", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt }),
+                body: JSON.stringify({ form, monsters: monsterSummaries }),
             });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
-                throw new Error(err.error || `Server error ${resp.status}`);
+                const e = new Error(err.error || `Server error ${resp.status}`);
+                e.status = resp.status;
+                throw e;
             }
             const data = await resp.json();
             const text = data.text || "";
@@ -400,8 +414,16 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
             setOutput(JSON.parse(clean));
             setTab("session");
         } catch (e) {
-            setError("Generation failed — please check your connection and try again.");
             console.error(e);
+            if (e.status === 529 || e.status === 503) {
+                setError("Anthropic's API is currently overloaded. Wait a moment and try again.");
+            } else if (e.status === 429) {
+                setError(e.message || "Rate limit hit. Wait a moment and try again.");
+            } else if (e.status === 401) {
+                setError("The server's API key is missing or invalid.");
+            } else {
+                setError(`Generation failed: ${e.message}`);
+            }
         } finally {
             setLoading(false);
         }
@@ -438,10 +460,24 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
         @keyframes sf-fade { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
         .sf-xpbar { background:#e5dfd3; border-radius:20px; height:6px; overflow:hidden; margin-top:8px; }
         .sf-xpfill { height:100%; border-radius:20px; transition:width 0.4s; }
+        .sf-tab-hidden { display:none; }
+        .sf-page-break { height:0; }
+        .sf-print-btn { position:absolute; top:0; right:0; padding:8px 16px; border-radius:8px; border:1.5px solid #1a1d29; background:#fff; color:#1a1d29; font-family:'Cinzel',serif; font-size:12px; font-weight:700; letter-spacing:0.08em; cursor:pointer; transition:all 0.15s; }
+        .sf-print-btn:hover { background:#1a1d29; color:#fff; }
+        @media print {
+          @page { margin: 0.6in; }
+          html, body { background:#fff !important; }
+          .sf-no-print { display:none !important; }
+          .sf-tab-hidden { display:block !important; }
+          .sf-page-break { page-break-before:always; height:0; }
+          .sf-statblock, .sf-monster-card { page-break-inside:avoid; break-inside:avoid; }
+          .sf-fadein { animation:none !important; }
+          .sf-output { margin-top:0 !important; }
+        }
       `}</style>
 
             {/* ── Header ── */}
-            <div style={{ background: "#1a1d29", padding: "20px 32px", display: "flex", alignItems: "center", gap: 14 }}>
+            <div className="sf-no-print" style={{ background: "#1a1d29", padding: "20px 32px", display: "flex", alignItems: "center", gap: 14 }}>
                 <span style={{ fontSize: 28 }}>⚔️</span>
                 <div>
                     <div style={{ fontFamily: "'Cinzel',serif", fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "0.05em" }}>Session Forge</div>
@@ -457,7 +493,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                 {/* ══ FORM SECTION ══ */}
 
                 {/* Card 1: The Party */}
-                <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div className="sf-no-print" style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                     <div style={{ fontFamily: "'Cinzel',serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#a8832a", marginBottom: 20 }}>
                         ⚔ The Party
                     </div>
@@ -465,7 +501,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24 }}>
                         <div>
                             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Number of Players</div>
-                            <Stepper value={form.playerCount} onChange={v => set("playerCount", v)} min={1} max={10} />
+                            <Stepper value={form.playerCount} onChange={v => set("playerCount", v)} min={1} max={MAX_PLAYERS} />
                         </div>
                         <div>
                             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Average Party Level</div>
@@ -489,7 +525,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
                             Notable Abilities or Context <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional)</span>
                         </div>
-                        <textarea className="sf-input" rows={2} style={{ resize: "vertical" }}
+                        <textarea className="sf-input" rows={2} maxLength={MAX_TEXT_LENGTH} style={{ resize: "vertical" }}
                             placeholder="e.g. Party has a Paladin aura; one PC is secretly cursed; last session ended on a cliffhanger..."
                             value={form.specialAbilities}
                             onChange={e => set("specialAbilities", e.target.value)} />
@@ -497,7 +533,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                 </div>
 
                 {/* Card 2: Session Settings */}
-                <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div className="sf-no-print" style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                     <div style={{ fontFamily: "'Cinzel',serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#a8832a", marginBottom: 20 }}>
                         🗺 Session Settings
                     </div>
@@ -553,7 +589,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                 </div>
 
                 {/* Card 3: Villain & Notes */}
-                <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 24, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div className="sf-no-print" style={{ background: "#fff", borderRadius: 16, border: "1px solid #e5dfd3", padding: 28, marginBottom: 24, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                     <div style={{ fontFamily: "'Cinzel',serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#a8832a", marginBottom: 20 }}>
                         🐉 Antagonist & Notes
                     </div>
@@ -571,7 +607,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
                             DM Notes <span style={{ fontWeight: 400, color: "#9ca3af" }}>(ongoing plot threads, player preferences, world state)</span>
                         </div>
-                        <textarea className="sf-input" rows={3} style={{ resize: "vertical" }}
+                        <textarea className="sf-input" rows={3} maxLength={MAX_TEXT_LENGTH} style={{ resize: "vertical" }}
                             placeholder="e.g. The party is hunting a cult; avoid undead — one player's uncomfortable; the BBEG is secretly a fallen paladin..."
                             value={form.notes}
                             onChange={e => set("notes", e.target.value)} />
@@ -579,24 +615,29 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                 </div>
 
                 {/* ── Generate Button ── */}
-                <button className="sf-gen" onClick={generate} disabled={loading}>
+                <button className="sf-gen sf-no-print" onClick={generate} disabled={loading}>
                     {loading
                         ? <><div className="sf-spinner" />Consulting the oracle...</>
                         : <>⚔ Forge This Session</>}
                 </button>
 
                 {error && (
-                    <div style={{ marginTop: 14, padding: "14px 18px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, color: "#991b1b", fontSize: 14 }}>
+                    <div className="sf-no-print" style={{ marginTop: 14, padding: "14px 18px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, color: "#991b1b", fontSize: 14 }}>
                         {error}
                     </div>
                 )}
 
                 {/* ══ OUTPUT SECTION ══ */}
                 {output && (
-                    <div style={{ marginTop: 40 }} className="sf-fadein">
+                    <div style={{ marginTop: 40 }} className="sf-fadein sf-output">
 
                         {/* Output Header */}
-                        <div style={{ textAlign: "center", marginBottom: 28 }}>
+                        <div style={{ textAlign: "center", marginBottom: 28, position: "relative" }}>
+                            <button
+                                className="sf-print-btn sf-no-print"
+                                onClick={() => window.print()}
+                                title="Print or save as PDF"
+                            >🖨 Print</button>
                             <div style={{ fontFamily: "'Cinzel',serif", fontSize: 24, fontWeight: 700, letterSpacing: "0.03em" }}>
                                 {output.sessionOutline?.title}
                             </div>
@@ -612,7 +653,7 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                         </div>
 
                         {/* Tabs */}
-                        <div style={{ display: "flex", borderBottom: "1px solid #e5dfd3", marginBottom: 28 }}>
+                        <div className="sf-no-print" style={{ display: "flex", borderBottom: "1px solid #e5dfd3", marginBottom: 28 }}>
                             <button className={`sf-tab ${tab === "session" ? "sf-tab-on" : ""}`} onClick={() => setTab("session")}>
                                 📜 Session Outline
                             </button>
@@ -621,11 +662,16 @@ Respond ONLY with a valid JSON object — no markdown, no commentary, no code fe
                             </button>
                         </div>
 
-                        {tab === "session" && <SessionTab data={output} form={form} />}
-                        {tab === "encounter" && <EncounterTab data={output} form={form} />}
+                        <div className={`sf-tab-content ${tab === "session" ? "" : "sf-tab-hidden"}`}>
+                            <SessionTab data={output} form={form} />
+                        </div>
+                        <div className="sf-page-break" />
+                        <div className={`sf-tab-content ${tab === "encounter" ? "" : "sf-tab-hidden"}`}>
+                            <EncounterTab data={output} form={form} monsterDetails={monsterDetails} />
+                        </div>
 
                         {/* Re-generate nudge */}
-                        <div style={{ marginTop: 36, textAlign: "center" }}>
+                        <div className="sf-no-print" style={{ marginTop: 36, textAlign: "center" }}>
                             <button className="sf-gen" style={{ maxWidth: 320, margin: "0 auto" }} onClick={generate} disabled={loading}>
                                 {loading ? <><div className="sf-spinner" />Regenerating...</> : <>↻ Regenerate Session</>}
                             </button>
